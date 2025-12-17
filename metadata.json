@@ -1,6 +1,6 @@
 {
-  "name": "Copy of 韩语学习app",
-  "description": "A natural, low-pressure Korean language learning companion focusing on conversation fluency and TOPIK 3-4 vocabulary acquisition.",
+  "name": "Hanbit 韩语学习",
+  "description": "一个自然的韩语学习伴侣，专注于对话流利度和词汇积累。",
   "requestFramePermissions": [
     "microphone"
   ]
