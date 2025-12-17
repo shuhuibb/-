@@ -1,0 +1,7 @@
+{
+  "name": "Copy of 韩语学习app",
+  "description": "A natural, low-pressure Korean language learning companion focusing on conversation fluency and TOPIK 3-4 vocabulary acquisition.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
