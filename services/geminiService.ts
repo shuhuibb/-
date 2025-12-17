@@ -2,7 +2,9 @@
 import { GoogleGenAI, Chat, Type, Schema, LiveServerMessage, Modality } from "@google/genai";
 import { Message, PartnerPersona, VocabQuestion, VocabMode } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Ensure API Key string is handled safely even if process.env is polyfilled strangely
+const apiKey = process.env.API_KEY || '';
+const ai = new GoogleGenAI({ apiKey: apiKey });
 
 const MODEL_CHAT = 'gemini-2.5-flash';
 const MODEL_VOCAB = 'gemini-2.5-flash';
@@ -128,7 +130,10 @@ export const generateTTS = async (text: string): Promise<string | null> => {
     });
     
     // The API returns raw PCM data in base64
-    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    const candidates = response.candidates;
+    if (!candidates || candidates.length === 0) return null;
+    
+    const audioData = candidates[0].content?.parts?.[0]?.inlineData?.data;
     return audioData || null;
   } catch (error) {
     console.error("TTS Generation Error:", error);
@@ -251,7 +256,11 @@ export const generateVocabBatch = async (count: number = 5, mode: VocabMode): Pr
       contents: prompt,
       config: { responseMimeType: "application/json", responseSchema: schema }
     });
-    const data = JSON.parse(response.text || "{}");
+    
+    // Ensure response.text exists before parsing
+    const responseText = response.text || "{}";
+    const data = JSON.parse(responseText);
+    
     if (!data.quizItems) return [];
     return data.quizItems.map((item: any, index: number) => {
       const options = [item.correctAnswer, item.distractor1, item.distractor2].sort(() => Math.random() - 0.5);
@@ -264,7 +273,10 @@ export const generateVocabBatch = async (count: number = 5, mode: VocabMode): Pr
         explanation: item.explanation
       };
     });
-  } catch (e) { return []; }
+  } catch (e) { 
+    console.error("Vocab Generation Error", e);
+    return []; 
+  }
 };
 
 // --- Live API Service (Real-time Audio) ---
