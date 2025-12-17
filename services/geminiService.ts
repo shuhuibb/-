@@ -34,15 +34,16 @@ export const sendMessageToGemini = async (text: string): Promise<string> => {
   if (!chatSession) throw new Error("Session not initialized");
   try {
     const response = await chatSession.sendMessage({ message: text });
-    return response.text || "죄송해요 (抱歉), 다시 말씀해 주시겠어요? (能请你再说一遍吗？)";
+    return response.text || "죄송해요 (抱歉), 다시 말씀解 주시겠어요? (能请你再说一遍吗？)";
   } catch (error) {
     console.error("Chat Error:", error);
     return "网络错误，请稍后再试。";
   }
 };
 
-// --- TTS 语音播报 ---
+// --- TTS 语音播报逻辑 ---
 let audioCtx: AudioContext | null = null;
+let lastSource: AudioBufferSourceNode | null = null;
 
 function decodeBase64(base64: string): Uint8Array {
   const bin = atob(base64);
@@ -55,6 +56,11 @@ async function playRawPcm(data: Uint8Array) {
   if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
   if (audioCtx.state === 'suspended') await audioCtx.resume();
 
+  // 如果正在播放，先停止上一个，避免重叠
+  if (lastSource) {
+    try { lastSource.stop(); } catch(e) {}
+  }
+
   const dataInt16 = new Int16Array(data.buffer);
   const buffer = audioCtx.createBuffer(1, dataInt16.length, 24000);
   const channelData = buffer.getChannelData(0);
@@ -66,12 +72,15 @@ async function playRawPcm(data: Uint8Array) {
   source.buffer = buffer;
   source.connect(audioCtx.destination);
   source.start();
+  lastSource = source;
 }
 
 export const speakKorean = async (text: string) => {
   try {
-    // 提取括号前的韩文原文用于播报
-    const koreanOnly = text.split('(')[0].trim();
+    // 智能过滤：提取括号前的韩文原文，过滤掉中文翻译
+    const koreanOnly = text.split('(')[0].split('（')[0].trim();
+    if (!koreanOnly) return;
+
     const response = await ai.models.generateContent({
       model: MODEL_TTS,
       contents: [{ parts: [{ text: koreanOnly }] }],

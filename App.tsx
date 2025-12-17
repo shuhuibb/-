@@ -59,6 +59,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // 初始化会话并获取首条消息
   useEffect(() => {
     initChatSession(scenario.contextPrompt);
     setLoading(true);
@@ -68,8 +69,18 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
     });
   }, [scenario]);
 
+  // 核心逻辑：自动朗读 AI 消息
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const lastMsg = messages[messages.length - 1];
+    // 只有当最后一条消息是来自 AI (model) 且不再加载时才朗读
+    if (lastMsg && lastMsg.role === 'model' && !loading) {
+      speakKorean(lastMsg.text);
+    }
+    
+    // 自动滚动到底部
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [messages, loading]);
 
   const handleSend = async () => {
@@ -87,7 +98,10 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
     <div className="flex flex-col h-dvh bg-slate-50 pt-safe">
       <div className="h-16 flex items-center justify-between px-6 bg-white border-b border-slate-100 shrink-0">
         <button onClick={onExit} className="p-2 text-slate-400"><X size={20} /></button>
-        <span className="font-bold text-slate-800">{scenario.title}</span>
+        <div className="flex flex-col items-center">
+          <span className="font-bold text-slate-800 text-sm leading-tight">{scenario.title}</span>
+          <span className="text-[10px] text-green-500 font-bold uppercase tracking-widest animate-pulse">● 通话中</span>
+        </div>
         <div className="w-8" />
       </div>
 
@@ -100,6 +114,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
                 <button 
                   onClick={() => speakKorean(m.text)}
                   className="absolute -right-10 top-2 p-2 bg-white rounded-full shadow-sm text-sapphire-500 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="重新播放"
                 >
                   <Volume2 size={16} />
                 </button>
@@ -107,7 +122,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
             </div>
           </div>
         ))}
-        {loading && <div className="text-xs italic text-slate-400 ml-2">正在思考...</div>}
+        {loading && <div className="text-xs italic text-slate-400 ml-2 animate-pulse">对方正在说话...</div>}
       </div>
 
       <div className="p-4 bg-white border-t border-slate-100 pb-safe shrink-0">
@@ -116,10 +131,12 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
             value={input} 
             onChange={e => setInput(e.target.value)} 
             onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder="输入内容..." 
-            className="flex-1 bg-slate-50 border-none rounded-xl px-4 py-2 outline-none" 
+            placeholder="用韩语回复..." 
+            className="flex-1 bg-slate-50 border-none rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-sapphire-100 transition-all" 
           />
-          <button onClick={handleSend} className="bg-sapphire-600 text-white p-2 rounded-xl"><Send size={20} /></button>
+          <button onClick={handleSend} className="bg-sapphire-600 text-white p-3 rounded-xl shadow-lg shadow-sapphire-100 active:scale-90 transition-transform">
+            <Send size={20} />
+          </button>
         </div>
       </div>
     </div>
@@ -163,12 +180,13 @@ const VocabView = () => {
         </div>
       ) : q && (
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Question Card - 不允许被挤压 */}
-          <div className="bg-white p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0">
+          <div className="bg-white p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative">
             <h2 className="text-3xl font-black text-slate-800">{q.questionText}</h2>
+            <button onClick={() => speakKorean(q.questionText)} className="mt-4 mx-auto block p-2 bg-slate-50 rounded-full text-sapphire-500">
+               <Volume2 size={20} />
+            </button>
           </div>
 
-          {/* Options List - 占用剩余空间并可滚动 */}
           <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pb-6">
             {q.options.map((opt, i) => (
               <button 
@@ -181,7 +199,6 @@ const VocabView = () => {
             ))}
           </div>
 
-          {/* Bottom Feedback Area */}
           {sel && (
             <div className="animate-fade-in mb-8 shrink-0">
               <div className="bg-sapphire-50 p-4 rounded-2xl mb-4">
@@ -201,7 +218,7 @@ export default function App() {
   const [activeScen, setActiveScen] = useState<Scenario | null>(null);
 
   const startFree = () => {
-    setActiveScen({ id: 'free', title: '自由练习', description: '', emoji: '💬', contextPrompt: 'Casual chat.' });
+    setActiveScen({ id: 'free', title: '自由通话', description: '', emoji: '💬', contextPrompt: 'Casual chat in Korean.' });
     setView(ViewState.CHAT);
   };
 
@@ -211,7 +228,7 @@ export default function App() {
       
       {view === ViewState.SCENARIO_SELECT && (
         <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar">
-          <h2 className="text-2xl font-bold mb-6">场景选择</h2>
+          <h2 className="text-2xl font-bold mb-6">场景练习</h2>
           <div className="space-y-4">
             {SCENARIOS.map(s => (
               <button key={s.id} onClick={() => { setActiveScen(s); setView(ViewState.CHAT); }} className="w-full bg-white p-5 rounded-3xl border border-slate-100 flex items-center justify-between group active:scale-[0.98] transition-all">
