@@ -339,7 +339,7 @@ export const startLiveSession = async (
         },
         onmessage: async (message: LiveServerMessage) => {
           // Handle Audio Output
-          const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+          const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
           if (audioData) {
             nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
             const audioBuffer = await decodeAudioData(
