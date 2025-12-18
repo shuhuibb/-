@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Book, MessageCircle, ChevronRight, X, User, RefreshCw, Volume2, ArrowLeft, Check, BookOpen, Headphones, Languages, AlertCircle } from 'lucide-react';
+import { Send, Book, MessageCircle, ChevronRight, X, User, RefreshCw, Volume2, ArrowLeft, Check, BookOpen, Headphones, Languages, AlertCircle, WifiOff } from 'lucide-react';
 import { ViewState, Message, Scenario, VocabMode, VocabQuestion } from './types';
-import { SCENARIOS, MOCK_STATS } from './constants';
+import { SCENARIOS, MOCK_STATS, FALLBACK_QUESTIONS } from './constants';
 import { initChatSession, sendMessageToGemini, speakKorean, generateVocabBatch } from './services/geminiService';
 
 const BottomNav = ({ currentView, setView }: { currentView: ViewState, setView: (v: ViewState) => void }) => (
@@ -20,7 +20,7 @@ const BottomNav = ({ currentView, setView }: { currentView: ViewState, setView: 
 );
 
 const HomeView = ({ onStartFree }: { onStartFree: () => void }) => (
-  <div className="p-6 pt-safe pb-32 h-dvh overflow-y-auto no-scrollbar">
+  <div className="p-6 pt-safe pb-32 h-dvh overflow-y-auto no-scrollbar animate-fade-in">
     <header className="mb-8">
       <h1 className="text-2xl font-bold text-slate-900">你好, Learner</h1>
       <p className="text-slate-500 text-sm mt-1">今天也要开心学韩语 ✨</p>
@@ -57,7 +57,10 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
     sendMessageToGemini(`[START] ${scenario.title}`).then(text => {
       setMessages([{ id: 'init', role: 'model', text, timestamp: Date.now() }]);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(() => {
+      setMessages([{ id: 'err', role: 'model', text: "网络好像断开了，不过没关系，我们可以先试试离线词汇练习！", timestamp: Date.now() }]);
+      setLoading(false);
+    });
   }, [scenario]);
 
   useEffect(() => {
@@ -76,14 +79,14 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
       const reply = await sendMessageToGemini(msg);
       setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'model', text: reply, timestamp: Date.now() }]);
     } catch (e) {
-      console.error(e);
+      setMessages(prev => [...prev, { id: 'err-send', role: 'model', text: "消息发送失败了，请检查网络后再试。", timestamp: Date.now() }]);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-dvh bg-slate-50 pt-safe overflow-hidden">
+    <div className="flex flex-col h-dvh bg-slate-50 pt-safe overflow-hidden animate-fade-in">
       <div className="h-16 flex items-center justify-between px-6 bg-white border-b border-slate-100 shrink-0">
         <button onClick={onExit} className="p-2 text-slate-400"><X size={20} /></button>
         <span className="font-bold text-slate-800 text-sm leading-tight">{scenario.title}</span>
@@ -117,7 +120,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
 const VocabView = () => {
   const [mode, setMode] = useState<VocabMode | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [questions, setQuestions] = useState<VocabQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sel, setSel] = useState<string | null>(null);
@@ -125,21 +128,24 @@ const VocabView = () => {
   const startQuiz = async (m: VocabMode) => {
     setMode(m);
     setLoading(true);
-    setError(false);
+    setIsOffline(false);
     setQuestions([]);
     setCurrentIndex(0);
     setSel(null);
     try {
+      // 尝试调用 API
       const res = await generateVocabBatch(m);
       if (res && res.length > 0) {
         setQuestions(res);
         if (m === VocabMode.LISTENING) speakKorean(res[0].questionText);
       } else {
-        setError(true);
+        throw new Error("Empty questions");
       }
     } catch (e) {
-      console.error("Quiz Start Error:", e);
-      setError(true);
+      // API 失败，静默降级到本地题库
+      console.warn("API 失败，加载兜底题库", e);
+      setIsOffline(true);
+      setQuestions(FALLBACK_QUESTIONS.sort(() => Math.random() - 0.5));
     } finally {
       setLoading(false);
     }
@@ -157,7 +163,7 @@ const VocabView = () => {
   };
 
   if (!mode) return (
-    <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar pb-32">
+    <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar pb-32 animate-fade-in">
       <h2 className="text-2xl font-bold mb-6">词汇挑战</h2>
       <div className="space-y-4">
         {[
@@ -180,23 +186,23 @@ const VocabView = () => {
     <div className="h-dvh flex flex-col bg-slate-50 pt-safe overflow-hidden">
       <div className="px-6 h-16 flex items-center shrink-0">
         <button onClick={() => setMode(null)} className="p-2 -ml-2"><ArrowLeft size={24} /></button>
-        <span className="ml-2 font-bold text-slate-400">词汇练习 - {currentIndex + 1}/5</span>
+        <span className="ml-2 font-bold text-slate-400">练习 - {currentIndex + 1}/{questions.length || 5}</span>
       </div>
       
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center">
           <RefreshCw className="animate-spin text-sapphire-500 mb-4" size={32} />
-          <p className="text-slate-400 text-sm">正在获取精选题目...</p>
-        </div>
-      ) : error ? (
-        <div className="flex-1 flex flex-col items-center justify-center px-10 text-center animate-fade-in">
-          <AlertCircle size={48} className="text-red-400 mb-4" />
-          <h3 className="font-bold text-slate-800 mb-2">生成题目失败</h3>
-          <p className="text-sm text-slate-400 mb-6 leading-relaxed">AI 正在思考中，可能网络稍有波动。请点击下方按钮重新尝试。</p>
-          <button onClick={() => startQuiz(mode)} className="bg-sapphire-600 text-white px-10 py-4 rounded-2xl font-bold shadow-lg shadow-sapphire-100 active:scale-95 transition-transform">重新获取题目</button>
+          <p className="text-slate-400 text-sm">正在加载题目内容...</p>
         </div>
       ) : currentQ ? (
         <div className="flex-1 flex flex-col overflow-hidden px-6 pb-32">
+          {isOffline && (
+            <div className="mb-4 flex items-center justify-center space-x-2 bg-amber-50 py-2 rounded-xl border border-amber-100 animate-fade-in">
+              <WifiOff size={14} className="text-amber-600" />
+              <span className="text-[11px] font-bold text-amber-700">网络稍显拥挤，当前为离线模式</span>
+            </div>
+          )}
+
           <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative border border-slate-50 animate-fade-in">
             <h2 className={`text-3xl font-black text-slate-800 transition-opacity duration-300 ${mode === VocabMode.LISTENING && !sel ? 'opacity-0' : 'opacity-100'}`}>{currentQ.questionText}</h2>
             {mode === VocabMode.LISTENING && (
@@ -223,7 +229,12 @@ const VocabView = () => {
              <button onClick={nextQuestion} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-bold shadow-2xl active:scale-95 transition-transform">下一题</button>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center p-10 text-center animate-fade-in">
+           <AlertCircle size={48} className="text-slate-300 mb-4" />
+           <p className="text-slate-400">暂时没有题目可显示，请尝试重新进入模式。</p>
+        </div>
+      )}
     </div>
   );
 };
@@ -236,7 +247,7 @@ export default function App() {
     <div className="h-dvh bg-slate-50 text-slate-900 overflow-hidden relative font-sans">
       {view === ViewState.HOME && <HomeView onStartFree={() => { setActiveScen({ id: 'free', title: '自由通话', description: '', emoji: '💬', contextPrompt: 'Casual chat.' }); setView(ViewState.CHAT); }} />}
       {view === ViewState.SCENARIO_SELECT && (
-        <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar pb-32">
+        <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar pb-32 animate-fade-in">
           <h2 className="text-2xl font-bold mb-6">场景练习</h2>
           <div className="space-y-4">
             {SCENARIOS.map(s => (
