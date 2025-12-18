@@ -57,7 +57,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
     sendMessageToGemini(`[START] ${scenario.title}`).then(text => {
       setMessages([{ id: 'init', role: 'model', text, timestamp: Date.now() }]);
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, [scenario]);
 
   useEffect(() => {
@@ -72,9 +72,14 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
     setInput('');
     setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: msg, timestamp: Date.now() }]);
     setLoading(true);
-    const reply = await sendMessageToGemini(msg);
-    setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'model', text: reply, timestamp: Date.now() }]);
-    setLoading(false);
+    try {
+      const reply = await sendMessageToGemini(msg);
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'model', text: reply, timestamp: Date.now() }]);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -126,20 +131,21 @@ const VocabView = () => {
     setSel(null);
     try {
       const res = await generateVocabBatch(m);
-      if (res.length > 0) {
+      if (res && res.length > 0) {
         setQuestions(res);
         if (m === VocabMode.LISTENING) speakKorean(res[0].questionText);
       } else {
         setError(true);
       }
     } catch (e) {
+      console.error("Quiz Start Error:", e);
       setError(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const nextQuestion = async () => {
+  const nextQuestion = () => {
     const nextIdx = currentIndex + 1;
     if (nextIdx >= questions.length) {
       startQuiz(mode!);
@@ -183,37 +189,37 @@ const VocabView = () => {
           <p className="text-slate-400 text-sm">正在获取精选题目...</p>
         </div>
       ) : error ? (
-        <div className="flex-1 flex flex-col items-center justify-center px-10 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center px-10 text-center animate-fade-in">
           <AlertCircle size={48} className="text-red-400 mb-4" />
-          <h3 className="font-bold text-slate-800 mb-2">加载失败</h3>
-          <p className="text-sm text-slate-400 mb-6">暂时无法连接到知识库，请检查网络或重试。</p>
-          <button onClick={() => startQuiz(mode)} className="bg-sapphire-600 text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-sapphire-100">点击重试</button>
+          <h3 className="font-bold text-slate-800 mb-2">生成题目失败</h3>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">AI 正在思考中，可能网络稍有波动。请点击下方按钮重新尝试。</p>
+          <button onClick={() => startQuiz(mode)} className="bg-sapphire-600 text-white px-10 py-4 rounded-2xl font-bold shadow-lg shadow-sapphire-100 active:scale-95 transition-transform">重新获取题目</button>
         </div>
       ) : currentQ ? (
         <div className="flex-1 flex flex-col overflow-hidden px-6 pb-32">
           <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative border border-slate-50 animate-fade-in">
-            <h2 className={`text-3xl font-black text-slate-800 transition-opacity ${mode === VocabMode.LISTENING && !sel ? 'opacity-0' : 'opacity-100'}`}>{currentQ.questionText}</h2>
+            <h2 className={`text-3xl font-black text-slate-800 transition-opacity duration-300 ${mode === VocabMode.LISTENING && !sel ? 'opacity-0' : 'opacity-100'}`}>{currentQ.questionText}</h2>
             {mode === VocabMode.LISTENING && (
-              <button onClick={() => speakKorean(currentQ.questionText)} className="mt-4 mx-auto flex items-center space-x-2 p-3 bg-sapphire-50 rounded-full text-sapphire-600 font-bold px-6">
+              <button onClick={() => speakKorean(currentQ.questionText)} className="mt-4 mx-auto flex items-center space-x-2 p-3 bg-sapphire-50 rounded-full text-sapphire-600 font-bold px-6 active:scale-95">
                 <Volume2 size={24} /><span>播放发音</span>
               </button>
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar min-h-0">
+          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar min-h-0 pb-4">
             {currentQ.options.map((opt, i) => (
-              <button key={i} onClick={() => !sel && setSel(opt)} className={`w-full py-4 px-6 rounded-2xl font-bold text-left border transition-all ${sel === opt ? (opt === currentQ.correctAnswer ? 'bg-green-500 text-white border-green-500' : 'bg-red-400 text-white border-red-400') : (sel && opt === currentQ.correctAnswer ? 'bg-green-500 text-white border-green-500' : 'bg-white border-slate-100 text-slate-600')}`}>
+              <button key={i} onClick={() => !sel && setSel(opt)} className={`w-full py-4 px-6 rounded-2xl font-bold text-left border transition-all duration-200 ${sel === opt ? (opt === currentQ.correctAnswer ? 'bg-green-500 text-white border-green-500 shadow-md' : 'bg-red-400 text-white border-red-400') : (sel && opt === currentQ.correctAnswer ? 'bg-green-500 text-white border-green-500' : 'bg-white border-slate-100 text-slate-600 shadow-sm')}`}>
                 {opt}
               </button>
             ))}
             {sel && (
-              <div className="animate-fade-in mt-4 bg-white p-5 rounded-2xl border border-sapphire-100">
-                <p className="text-xs text-sapphire-700 leading-relaxed font-medium">💡 解析：{currentQ.explanation}</p>
+              <div className="animate-fade-in mt-4 bg-white p-6 rounded-2xl border border-sapphire-100 shadow-sm">
+                <p className="text-sm text-sapphire-800 leading-relaxed font-medium">💡 解析：{currentQ.explanation}</p>
               </div>
             )}
           </div>
 
-          <div className={`fixed bottom-24 left-6 right-6 transition-all duration-300 ${sel ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
+          <div className={`fixed bottom-24 left-6 right-6 transition-all duration-300 z-10 ${sel ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
              <button onClick={nextQuestion} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-bold shadow-2xl active:scale-95 transition-transform">下一题</button>
           </div>
         </div>

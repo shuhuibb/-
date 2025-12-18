@@ -1,9 +1,9 @@
 
 import { GoogleGenAI, Chat, Type, Modality } from "@google/genai";
-import { Message, VocabQuestion, VocabMode } from '../types';
+import { VocabQuestion, VocabMode } from '../types';
 
-// 按照指南，直接使用 process.env.API_KEY 初始化
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// 严格遵循初始化规则：直接使用 process.env.API_KEY
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const MODEL_TEXT = 'gemini-3-flash-preview';
 const MODEL_TTS = 'gemini-2.5-flash-preview-tts';
@@ -24,19 +24,30 @@ export const initChatSession = (context: string) => {
 
 export const sendMessageToGemini = async (text: string): Promise<string> => {
   if (!chatSession) throw new Error("Session not initialized");
-  const response = await chatSession.sendMessage({ message: text });
-  return response.text || "죄송해요 (抱歉), 다시 말씀해 주시겠어요?";
+  try {
+    const response = await chatSession.sendMessage({ message: text });
+    return response.text || "죄송해요 (抱歉), 다시 말씀해 주시겠어요?";
+  } catch (error) {
+    console.error("Chat Message Error:", error);
+    throw error;
+  }
 };
 
-// --- TTS ---
+// --- TTS 音频处理 ---
 let audioCtx: AudioContext | null = null;
 async function playRawPcm(data: Uint8Array) {
-  if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  }
   if (audioCtx.state === 'suspended') await audioCtx.resume();
+  
   const dataInt16 = new Int16Array(data.buffer);
   const buffer = audioCtx.createBuffer(1, dataInt16.length, 24000);
   const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+  for (let i = 0; i < dataInt16.length; i++) {
+    channelData[i] = dataInt16[i] / 32768.0;
+  }
+  
   const source = audioCtx.createBufferSource();
   source.buffer = buffer;
   source.connect(audioCtx.destination);
@@ -46,6 +57,8 @@ async function playRawPcm(data: Uint8Array) {
 export const speakKorean = async (text: string) => {
   try {
     const koreanOnly = text.split('(')[0].split('（')[0].trim();
+    if (!koreanOnly) return;
+    
     const response = await ai.models.generateContent({
       model: MODEL_TTS,
       contents: [{ parts: [{ text: koreanOnly }] }],
@@ -54,6 +67,7 @@ export const speakKorean = async (text: string) => {
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
       },
     });
+    
     const audioBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (audioBase64) {
       const bin = atob(audioBase64);
@@ -61,10 +75,12 @@ export const speakKorean = async (text: string) => {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       await playRawPcm(bytes);
     }
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    console.error("TTS Playback Error:", e);
+  }
 };
 
-// --- Vocab ---
+// --- 词汇生成 ---
 export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion[]> => {
   const schema = {
     type: Type.OBJECT,
@@ -74,10 +90,10 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
         items: {
           type: Type.OBJECT,
           properties: {
-            q: { type: Type.STRING },
-            a: { type: Type.STRING },
-            o: { type: Type.ARRAY, items: { type: Type.STRING } },
-            e: { type: Type.STRING }
+            q: { type: Type.STRING, description: "题目内容" },
+            a: { type: Type.STRING, description: "正确答案内容" },
+            o: { type: Type.ARRAY, items: { type: Type.STRING }, description: "包含正确答案在内的3个选项列表" },
+            e: { type: Type.STRING, description: "中文解析或用法说明" }
           },
           required: ["q", "a", "o", "e"]
         }
@@ -87,11 +103,12 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
   };
 
   const seed = Date.now();
-  let prompt = `随机生成 5 个互不相同的 TOPIK 1-4 级词汇练习题。种子: ${seed}。`;
+  let prompt = `请随机从 TOPIK 1-4 级词库中生成 5 个互不相同的词汇练习题。避免生成简单的打招呼词汇。种子值: ${seed}。`;
+  
   if (mode === VocabMode.LISTENING || mode === VocabMode.READING_K_C) {
-    prompt += "模式: 韩语单词选中文翻译。q字段为韩语单词。";
+    prompt += "模式为韩选中：q字段必须是韩语单词，a字段是其中文翻译。";
   } else {
-    prompt += "模式: 中文翻译选韩语单词。q字段为中文意思。";
+    prompt += "模式为中选韩：q字段必须是中文意思，a字段是其韩语单词。";
   }
 
   try {
@@ -101,11 +118,17 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
       config: { 
         responseMimeType: "application/json", 
         responseSchema: schema,
-        temperature: 0.9 
+        temperature: 0.95
       }
     });
-    const data = JSON.parse(response.text || '{"items":[]}');
-    return (data.items || []).map((it: any, idx: number) => ({
+    
+    const responseText = response.text;
+    if (!responseText) throw new Error("No response from AI");
+    
+    const data = JSON.parse(responseText);
+    if (!data.items || !Array.isArray(data.items)) throw new Error("Invalid response format");
+    
+    return data.items.map((it: any, idx: number) => ({
       id: `${seed}-${idx}`,
       type: mode === VocabMode.READING_C_K ? 'C_TO_K' : 'K_TO_C',
       questionText: it.q,
@@ -114,7 +137,7 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
       explanation: it.e
     }));
   } catch (e) {
-    console.error("Generate Batch Error:", e);
+    console.error("Vocab Generation Failed:", e);
     throw e;
   }
 };
