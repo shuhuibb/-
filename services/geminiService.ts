@@ -2,8 +2,8 @@
 import { GoogleGenAI, Chat, Type, Modality } from "@google/genai";
 import { VocabQuestion, VocabMode } from '../types';
 
-// 严格遵循初始化规则：直接使用 process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// 直接从环境变量获取 API Key
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
 const MODEL_TEXT = 'gemini-3-flash-preview';
 const MODEL_TTS = 'gemini-2.5-flash-preview-tts';
@@ -33,7 +33,7 @@ export const sendMessageToGemini = async (text: string): Promise<string> => {
   }
 };
 
-// --- TTS 音频处理 ---
+// --- TTS 音频播放逻辑 ---
 let audioCtx: AudioContext | null = null;
 async function playRawPcm(data: Uint8Array) {
   if (!audioCtx) {
@@ -80,7 +80,7 @@ export const speakKorean = async (text: string) => {
   }
 };
 
-// --- 词汇生成 ---
+// --- 词汇挑战题目生成 ---
 export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion[]> => {
   const schema = {
     type: Type.OBJECT,
@@ -90,10 +90,10 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
         items: {
           type: Type.OBJECT,
           properties: {
-            q: { type: Type.STRING, description: "题目内容" },
+            q: { type: Type.STRING, description: "题目文本（韩语单词或中文意思）" },
             a: { type: Type.STRING, description: "正确答案内容" },
-            o: { type: Type.ARRAY, items: { type: Type.STRING }, description: "包含正确答案在内的3个选项列表" },
-            e: { type: Type.STRING, description: "中文解析或用法说明" }
+            o: { type: Type.ARRAY, items: { type: Type.STRING }, description: "包含正确答案在内的3个互不相同的备选项" },
+            e: { type: Type.STRING, description: "详细的中文解析" }
           },
           required: ["q", "a", "o", "e"]
         }
@@ -102,13 +102,14 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
     required: ["items"]
   };
 
-  const seed = Date.now();
-  let prompt = `请随机从 TOPIK 1-4 级词库中生成 5 个互不相同的词汇练习题。避免生成简单的打招呼词汇。种子值: ${seed}。`;
+  const seed = Date.now() + Math.random();
+  let prompt = `你是一个专业的韩语教育专家。请随机挑选 5 个互不相同的 TOPIK 1-4 级核心词汇。
+  不要生成过于简单的词。随机种子：${seed}。`;
   
   if (mode === VocabMode.LISTENING || mode === VocabMode.READING_K_C) {
-    prompt += "模式为韩选中：q字段必须是韩语单词，a字段是其中文翻译。";
+    prompt += "\n模式：韩选中。q为韩语单词，a为正确中文意思，o必须包含a和另外2个中文干扰项。";
   } else {
-    prompt += "模式为中选韩：q字段必须是中文意思，a字段是其韩语单词。";
+    prompt += "\n模式：中选韩。q为中文意思，a为正确韩语单词，o必须包含a和另外2个韩语干扰项。";
   }
 
   try {
@@ -122,12 +123,9 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
       }
     });
     
-    const responseText = response.text;
-    if (!responseText) throw new Error("No response from AI");
-    
-    const data = JSON.parse(responseText);
-    if (!data.items || !Array.isArray(data.items)) throw new Error("Invalid response format");
-    
+    const data = JSON.parse(response.text || '{"items":[]}');
+    if (!data.items || data.items.length === 0) throw new Error("Empty questions list");
+
     return data.items.map((it: any, idx: number) => ({
       id: `${seed}-${idx}`,
       type: mode === VocabMode.READING_C_K ? 'C_TO_K' : 'K_TO_C',
