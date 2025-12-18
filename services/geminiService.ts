@@ -1,15 +1,14 @@
 
-import { GoogleGenAI, Chat, Type, Schema, Modality } from "@google/genai";
+// Use GoogleGenAI from @google/genai
+import { GoogleGenAI, Chat, Type, Modality } from "@google/genai";
 import { Message, VocabQuestion, VocabMode } from '../types';
 
-// 根据您的要求，使用 VITE_ 环境变量获取密钥
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey: apiKey });
+// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const MODEL_TEXT = 'gemini-3-flash-preview';
 const MODEL_TTS = 'gemini-2.5-flash-preview-tts';
 
-// --- 系统指令：要求 AI 在回复中直接带翻译 ---
 const SYSTEM_INSTRUCTION = `
 你是一位友善的韩国朋友。
 1. 请只用韩语交流。
@@ -34,14 +33,14 @@ export const sendMessageToGemini = async (text: string): Promise<string> => {
   if (!chatSession) throw new Error("Session not initialized");
   try {
     const response = await chatSession.sendMessage({ message: text });
-    return response.text || "죄송해요 (抱歉), 다시 말씀解 주시겠어요? (能请你再说一遍吗？)";
+    return response.text || "죄송해요 (抱歉), 다시 말씀해 주시겠어요? (能请你再说一遍吗？)";
   } catch (error) {
     console.error("Chat Error:", error);
     return "网络错误，请稍后再试。";
   }
 };
 
-// --- TTS 语音播报逻辑 ---
+// --- TTS 逻辑 ---
 let audioCtx: AudioContext | null = null;
 let lastSource: AudioBufferSourceNode | null = null;
 
@@ -56,7 +55,6 @@ async function playRawPcm(data: Uint8Array) {
   if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
   if (audioCtx.state === 'suspended') await audioCtx.resume();
 
-  // 如果正在播放，先停止上一个，避免重叠
   if (lastSource) {
     try { lastSource.stop(); } catch(e) {}
   }
@@ -77,7 +75,6 @@ async function playRawPcm(data: Uint8Array) {
 
 export const speakKorean = async (text: string) => {
   try {
-    // 智能过滤：提取括号前的韩文原文，过滤掉中文翻译
     const koreanOnly = text.split('(')[0].split('（')[0].trim();
     if (!koreanOnly) return;
 
@@ -101,9 +98,9 @@ export const speakKorean = async (text: string) => {
   }
 };
 
-// --- 词汇服务 ---
+// --- 词汇服务：增加多样性和批量生成 ---
 export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion[]> => {
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       items: {
@@ -111,10 +108,10 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
         items: {
           type: Type.OBJECT,
           properties: {
-            q: { type: Type.STRING },
-            a: { type: Type.STRING },
-            o: { type: Type.ARRAY, items: { type: Type.STRING } },
-            e: { type: Type.STRING }
+            q: { type: Type.STRING, description: "题目文本" },
+            a: { type: Type.STRING, description: "正确选项文本" },
+            o: { type: Type.ARRAY, items: { type: Type.STRING }, description: "包含正确项在内的3个选项" },
+            e: { type: Type.STRING, description: "中文解析" }
           },
           required: ["q", "a", "o", "e"]
         }
@@ -123,23 +120,35 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
     required: ["items"]
   };
 
+  const seed = Math.floor(Math.random() * 1000);
+  let prompt = `随机从 TOPIK 1-4 级词库中挑选 5 个互不相同的生僻词汇或常用表达。随机种子: ${seed}。`;
+  
+  if (mode === VocabMode.LISTENING || mode === VocabMode.READING_K_C) {
+    prompt += "模式: 韩选中。q为韩语，a为正确中文翻译，o包含a和2个干扰项。";
+  } else {
+    prompt += "模式: 中选韩。q为中文意思，a为正确韩语，o包含a和2个干扰项。";
+  }
+
   try {
     const response = await ai.models.generateContent({
       model: MODEL_TEXT,
-      contents: `生成3个韩语练习题。模式: ${mode}。o 字段必须包含 a 和 2 个干扰项。e 字段是中文解释。`,
-      config: { responseMimeType: "application/json", responseSchema: schema }
+      contents: prompt,
+      config: { 
+        responseMimeType: "application/json", 
+        responseSchema: schema,
+        temperature: 0.9 // 提高随机性
+      }
     });
     const data = JSON.parse(response.text || "{}");
     return (data.items || []).map((it: any, idx: number) => ({
-      id: Date.now().toString() + idx,
-      type: 'K_TO_C',
+      id: `${Date.now()}-${idx}-${seed}`,
+      type: mode === VocabMode.READING_C_K ? 'C_TO_K' : 'K_TO_C',
       questionText: it.q,
       options: it.o.sort(() => Math.random() - 0.5),
       correctAnswer: it.a,
       explanation: it.e
     }));
   } catch (e) { 
-    console.error("Vocab Error", e);
     return []; 
   }
 };

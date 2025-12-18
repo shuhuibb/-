@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Book, MessageCircle, ChevronRight, X, User, RefreshCw, Volume2, ArrowLeft, Check, BookOpen } from 'lucide-react';
+import { Send, Book, MessageCircle, ChevronRight, X, User, RefreshCw, Volume2, ArrowLeft, Check, BookOpen, Headphones, Languages } from 'lucide-react';
 import { ViewState, Message, Scenario, VocabMode, VocabQuestion } from './types';
 import { SCENARIOS, MOCK_STATS } from './constants';
 import { initChatSession, sendMessageToGemini, speakKorean, generateVocabBatch } from './services/geminiService';
@@ -59,7 +59,6 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 初始化会话并获取首条消息
   useEffect(() => {
     initChatSession(scenario.contextPrompt);
     setLoading(true);
@@ -69,18 +68,12 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
     });
   }, [scenario]);
 
-  // 核心逻辑：自动朗读 AI 消息
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
-    // 只有当最后一条消息是来自 AI (model) 且不再加载时才朗读
     if (lastMsg && lastMsg.role === 'model' && !loading) {
       speakKorean(lastMsg.text);
     }
-    
-    // 自动滚动到底部
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, loading]);
 
   const handleSend = async () => {
@@ -111,11 +104,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
             <div className={`max-w-[85%] px-4 py-3 rounded-2xl shadow-sm relative group ${m.role === 'user' ? 'bg-sapphire-600 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none'}`}>
               <p className="text-sm">{m.text}</p>
               {m.role === 'model' && (
-                <button 
-                  onClick={() => speakKorean(m.text)}
-                  className="absolute -right-10 top-2 p-2 bg-white rounded-full shadow-sm text-sapphire-500 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="重新播放"
-                >
+                <button onClick={() => speakKorean(m.text)} className="absolute -right-10 top-2 p-2 bg-white rounded-full shadow-sm text-sapphire-500 opacity-100 transition-opacity">
                   <Volume2 size={16} />
                 </button>
               )}
@@ -132,11 +121,9 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
             onChange={e => setInput(e.target.value)} 
             onKeyDown={e => e.key === 'Enter' && handleSend()}
             placeholder="用韩语回复..." 
-            className="flex-1 bg-slate-50 border-none rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-sapphire-100 transition-all" 
+            className="flex-1 bg-slate-50 border-none rounded-xl px-4 py-3 outline-none" 
           />
-          <button onClick={handleSend} className="bg-sapphire-600 text-white p-3 rounded-xl shadow-lg shadow-sapphire-100 active:scale-90 transition-transform">
-            <Send size={20} />
-          </button>
+          <button onClick={handleSend} className="bg-sapphire-600 text-white p-3 rounded-xl"><Send size={20} /></button>
         </div>
       </div>
     </div>
@@ -145,68 +132,124 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
 
 // --- 词汇挑战 ---
 const VocabView = () => {
-  const [active, setActive] = useState(false);
+  const [mode, setMode] = useState<VocabMode | null>(null);
   const [loading, setLoading] = useState(false);
-  const [q, setQ] = useState<VocabQuestion | null>(null);
+  const [questions, setQuestions] = useState<VocabQuestion[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [sel, setSel] = useState<string | null>(null);
 
-  const load = async () => {
+  // 预加载逻辑
+  const fetchMore = async (m: VocabMode) => {
+    const res = await generateVocabBatch(m);
+    setQuestions(prev => [...prev, ...res]);
+    return res;
+  };
+
+  const startQuiz = async (m: VocabMode) => {
+    setMode(m);
     setLoading(true);
+    setQuestions([]);
+    setCurrentIndex(0);
     setSel(null);
-    const res = await generateVocabBatch(VocabMode.READING_K_C);
-    if (res.length > 0) setQ(res[0]);
+    const firstBatch = await fetchMore(m);
+    if (firstBatch.length > 0) {
+      if (m === VocabMode.LISTENING) {
+        speakKorean(firstBatch[0].questionText);
+      }
+    }
     setLoading(false);
   };
 
-  if (!active) return (
-    <div className="p-6 pt-safe h-dvh flex flex-col items-center justify-center">
-      <div className="p-8 bg-white rounded-[3rem] shadow-sm border border-slate-100 text-center">
-        <BookOpen size={48} className="mx-auto text-sapphire-500 mb-4" />
-        <h2 className="text-xl font-bold mb-2">词汇量测试</h2>
-        <p className="text-sm text-slate-400 mb-6">通过小测验巩固你的韩语词汇</p>
-        <button onClick={() => { setActive(true); load(); }} className="bg-sapphire-600 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-sapphire-100">开始挑战</button>
+  const nextQuestion = async () => {
+    const nextIdx = currentIndex + 1;
+    setSel(null);
+    setCurrentIndex(nextIdx);
+
+    // 如果快到底了，偷偷预加载下一批
+    if (questions.length - nextIdx < 3 && mode) {
+      fetchMore(mode);
+    }
+
+    // 听力模式自动朗读下一题
+    if (mode === VocabMode.LISTENING && questions[nextIdx]) {
+      speakKorean(questions[nextIdx].questionText);
+    }
+  };
+
+  if (!mode) return (
+    <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar pb-32">
+      <h2 className="text-2xl font-bold mb-6">词汇挑战</h2>
+      <div className="space-y-4">
+        {[
+          { m: VocabMode.LISTENING, t: '听音辨义', d: '听发音，选正确翻译', i: <Headphones className="text-sapphire-500" /> },
+          { m: VocabMode.READING_K_C, t: '韩语选义', d: '看韩语，选正确翻译', i: <BookOpen className="text-sapphire-500" /> },
+          { m: VocabMode.READING_C_K, t: '中选韩语', d: '看意思，选正确韩语', i: <Languages className="text-sapphire-500" /> }
+        ].map((item) => (
+          <button key={item.m} onClick={() => startQuiz(item.m)} className="w-full bg-white p-6 rounded-3xl border border-slate-100 flex items-center space-x-4 shadow-sm active:scale-95 transition-all text-left">
+            <div className="p-3 bg-sapphire-50 rounded-2xl shrink-0">{item.i}</div>
+            <div><h4 className="font-bold text-slate-800">{item.t}</h4><p className="text-xs text-slate-400">{item.d}</p></div>
+          </button>
+        ))}
       </div>
     </div>
   );
 
+  const currentQ = questions[currentIndex];
+
   return (
-    <div className="p-6 pt-safe h-dvh flex flex-col overflow-hidden">
-      <button onClick={() => setActive(false)} className="mb-8 p-2 w-fit shrink-0"><ArrowLeft size={24} /></button>
+    <div className="h-dvh flex flex-col bg-slate-50 pt-safe overflow-hidden">
+      <div className="px-6 h-16 flex items-center shrink-0">
+        <button onClick={() => setMode(null)} className="p-2 -ml-2"><ArrowLeft size={24} /></button>
+        <span className="ml-2 font-bold text-slate-400">词汇练习 - 第 {currentIndex + 1} 题</span>
+      </div>
       
       {loading ? (
-        <div className="m-auto flex flex-col items-center">
+        <div className="flex-1 flex flex-col items-center justify-center">
           <RefreshCw className="animate-spin text-sapphire-500 mb-4" size={32} />
-          <p className="text-slate-400">正在生成题目...</p>
+          <p className="text-slate-400 text-sm">正在加载题目...</p>
         </div>
-      ) : q && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="bg-white p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative">
-            <h2 className="text-3xl font-black text-slate-800">{q.questionText}</h2>
-            <button onClick={() => speakKorean(q.questionText)} className="mt-4 mx-auto block p-2 bg-slate-50 rounded-full text-sapphire-500">
-               <Volume2 size={20} />
-            </button>
+      ) : currentQ && (
+        <div className="flex-1 flex flex-col overflow-hidden px-6">
+          {/* Question Card - 固定在顶部，防止挤压 */}
+          <div className="bg-white p-8 sm:p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative border border-slate-50">
+            <h2 className={`text-3xl font-black text-slate-800 transition-opacity duration-300 ${mode === VocabMode.LISTENING && !sel ? 'opacity-0' : 'opacity-100'}`}>
+              {currentQ.questionText}
+            </h2>
+            {mode === VocabMode.LISTENING && (
+              <button onClick={() => speakKorean(currentQ.questionText)} className="mt-4 mx-auto flex items-center space-x-2 p-3 bg-sapphire-50 rounded-full text-sapphire-600 font-bold px-6 active:scale-95 transition-all">
+                <Volume2 size={24} />
+                <span>点击播放</span>
+              </button>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pb-6">
-            {q.options.map((opt, i) => (
+          {/* Options List - 占用中间区域，允许内部滚动 */}
+          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pb-8 min-h-0">
+            {currentQ.options.map((opt, i) => (
               <button 
                 key={i} 
                 onClick={() => !sel && setSel(opt)} 
-                className={`w-full py-4 px-6 rounded-2xl font-bold text-left border transition-all ${sel === opt ? (opt === q.correctAnswer ? 'bg-green-500 text-white border-green-500' : 'bg-red-400 text-white border-red-400') : (sel && opt === q.correctAnswer ? 'bg-green-500 text-white border-green-500' : 'bg-white border-slate-100')}`}
+                className={`w-full py-4 px-6 rounded-2xl font-bold text-left border transition-all duration-200 ${sel === opt ? (opt === currentQ.correctAnswer ? 'bg-green-500 text-white border-green-500 shadow-lg' : 'bg-red-400 text-white border-red-400') : (sel && opt === currentQ.correctAnswer ? 'bg-green-500 text-white border-green-500' : 'bg-white border-slate-100 text-slate-600')}`}
               >
                 {opt}
               </button>
             ))}
+
+            {sel && (
+              <div className="animate-fade-in mt-4">
+                <div className="bg-white p-5 rounded-2xl border border-sapphire-100 mb-6">
+                  <p className="text-xs text-sapphire-700 leading-relaxed font-medium">💡 解析：{currentQ.explanation}</p>
+                </div>
+              </div>
+            )}
           </div>
 
-          {sel && (
-            <div className="animate-fade-in mb-8 shrink-0">
-              <div className="bg-sapphire-50 p-4 rounded-2xl mb-4">
-                <p className="text-xs text-sapphire-700 leading-relaxed font-medium">{q.explanation}</p>
-              </div>
-              <button onClick={load} className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold shadow-lg">下一题</button>
-            </div>
-          )}
+          {/* 下一题按钮 - 始终固定在底部 safe 区域之上，不被挤压 */}
+          <div className={`shrink-0 pb-32 transition-all duration-300 ${sel ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
+             <button onClick={nextQuestion} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-bold shadow-xl active:scale-95 transition-transform">
+                下一题
+             </button>
+          </div>
         </div>
       )}
     </div>
@@ -217,17 +260,12 @@ export default function App() {
   const [view, setView] = useState<ViewState>(ViewState.HOME);
   const [activeScen, setActiveScen] = useState<Scenario | null>(null);
 
-  const startFree = () => {
-    setActiveScen({ id: 'free', title: '自由通话', description: '', emoji: '💬', contextPrompt: 'Casual chat in Korean.' });
-    setView(ViewState.CHAT);
-  };
-
   return (
     <div className="h-dvh bg-slate-50 text-slate-900 overflow-hidden relative font-sans">
-      {view === ViewState.HOME && <HomeView onStartFree={startFree} />}
+      {view === ViewState.HOME && <HomeView onStartFree={() => { setActiveScen({ id: 'free', title: '自由通话', description: '', emoji: '💬', contextPrompt: 'Casual chat.' }); setView(ViewState.CHAT); }} />}
       
       {view === ViewState.SCENARIO_SELECT && (
-        <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar">
+        <div className="p-6 pt-safe h-dvh overflow-y-auto no-scrollbar pb-32">
           <h2 className="text-2xl font-bold mb-6">场景练习</h2>
           <div className="space-y-4">
             {SCENARIOS.map(s => (
