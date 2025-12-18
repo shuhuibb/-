@@ -1,10 +1,18 @@
 
-// Use GoogleGenAI from @google/genai
 import { GoogleGenAI, Chat, Type, Modality } from "@google/genai";
 import { Message, VocabQuestion, VocabMode } from '../types';
 
-// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// 安全地获取 API Key，防止 process 未定义导致崩溃
+const getApiKey = () => {
+  try {
+    return process.env.API_KEY || '';
+  } catch (e) {
+    return '';
+  }
+};
+
+const apiKey = getApiKey();
+const ai = new GoogleGenAI({ apiKey });
 
 const MODEL_TEXT = 'gemini-3-flash-preview';
 const MODEL_TTS = 'gemini-2.5-flash-preview-tts';
@@ -74,6 +82,7 @@ async function playRawPcm(data: Uint8Array) {
 }
 
 export const speakKorean = async (text: string) => {
+  if (!apiKey) return;
   try {
     const koreanOnly = text.split('(')[0].split('（')[0].trim();
     if (!koreanOnly) return;
@@ -100,6 +109,8 @@ export const speakKorean = async (text: string) => {
 
 // --- 词汇服务：增加多样性和批量生成 ---
 export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion[]> => {
+  if (!apiKey) return [];
+  
   const schema = {
     type: Type.OBJECT,
     properties: {
@@ -108,10 +119,10 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
         items: {
           type: Type.OBJECT,
           properties: {
-            q: { type: Type.STRING, description: "题目文本" },
-            a: { type: Type.STRING, description: "正确选项文本" },
-            o: { type: Type.ARRAY, items: { type: Type.STRING }, description: "包含正确项在内的3个选项" },
-            e: { type: Type.STRING, description: "中文解析" }
+            q: { type: Type.STRING },
+            a: { type: Type.STRING },
+            o: { type: Type.ARRAY, items: { type: Type.STRING } },
+            e: { type: Type.STRING }
           },
           required: ["q", "a", "o", "e"]
         }
@@ -120,13 +131,13 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
     required: ["items"]
   };
 
-  const seed = Math.floor(Math.random() * 1000);
-  let prompt = `随机从 TOPIK 1-4 级词库中挑选 5 个互不相同的生僻词汇或常用表达。随机种子: ${seed}。`;
+  const randomSeed = Date.now();
+  let prompt = `随机从 TOPIK 1-4 级词库中挑选 5 个互不相同的词汇。避免重复出现简单的词。种子: ${randomSeed}。`;
   
   if (mode === VocabMode.LISTENING || mode === VocabMode.READING_K_C) {
-    prompt += "模式: 韩选中。q为韩语，a为正确中文翻译，o包含a和2个干扰项。";
+    prompt += "q是韩语，a是正确中文意思，o包含a和2个中文干扰项。";
   } else {
-    prompt += "模式: 中选韩。q为中文意思，a为正确韩语，o包含a和2个干扰项。";
+    prompt += "q是中文，a是正确韩语，o包含a和2个韩语干扰项。";
   }
 
   try {
@@ -136,12 +147,12 @@ export const generateVocabBatch = async (mode: VocabMode): Promise<VocabQuestion
       config: { 
         responseMimeType: "application/json", 
         responseSchema: schema,
-        temperature: 0.9 // 提高随机性
+        temperature: 0.95 // 极高随机性
       }
     });
     const data = JSON.parse(response.text || "{}");
     return (data.items || []).map((it: any, idx: number) => ({
-      id: `${Date.now()}-${idx}-${seed}`,
+      id: `${randomSeed}-${idx}`,
       type: mode === VocabMode.READING_C_K ? 'C_TO_K' : 'K_TO_C',
       questionText: it.q,
       options: it.o.sort(() => Math.random() - 0.5),

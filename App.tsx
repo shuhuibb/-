@@ -88,7 +88,7 @@ const ChatInterface = ({ scenario, onExit }: { scenario: Scenario, onExit: () =>
   };
 
   return (
-    <div className="flex flex-col h-dvh bg-slate-50 pt-safe">
+    <div className="flex flex-col h-dvh bg-slate-50 pt-safe overflow-hidden">
       <div className="h-16 flex items-center justify-between px-6 bg-white border-b border-slate-100 shrink-0">
         <button onClick={onExit} className="p-2 text-slate-400"><X size={20} /></button>
         <div className="flex flex-col items-center">
@@ -138,7 +138,6 @@ const VocabView = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sel, setSel] = useState<string | null>(null);
 
-  // 预加载逻辑
   const fetchMore = async (m: VocabMode) => {
     const res = await generateVocabBatch(m);
     setQuestions(prev => [...prev, ...res]);
@@ -165,12 +164,10 @@ const VocabView = () => {
     setSel(null);
     setCurrentIndex(nextIdx);
 
-    // 如果快到底了，偷偷预加载下一批
     if (questions.length - nextIdx < 3 && mode) {
       fetchMore(mode);
     }
 
-    // 听力模式自动朗读下一题
     if (mode === VocabMode.LISTENING && questions[nextIdx]) {
       speakKorean(questions[nextIdx].questionText);
     }
@@ -210,8 +207,8 @@ const VocabView = () => {
         </div>
       ) : currentQ && (
         <div className="flex-1 flex flex-col overflow-hidden px-6">
-          {/* Question Card - 固定在顶部，防止挤压 */}
-          <div className="bg-white p-8 sm:p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative border border-slate-50">
+          {/* Question Card */}
+          <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-sm text-center mb-6 shrink-0 relative border border-slate-50">
             <h2 className={`text-3xl font-black text-slate-800 transition-opacity duration-300 ${mode === VocabMode.LISTENING && !sel ? 'opacity-0' : 'opacity-100'}`}>
               {currentQ.questionText}
             </h2>
@@ -223,8 +220,8 @@ const VocabView = () => {
             )}
           </div>
 
-          {/* Options List - 占用中间区域，允许内部滚动 */}
-          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pb-8 min-h-0">
+          {/* Options List */}
+          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar min-h-0">
             {currentQ.options.map((opt, i) => (
               <button 
                 key={i} 
@@ -236,16 +233,16 @@ const VocabView = () => {
             ))}
 
             {sel && (
-              <div className="animate-fade-in mt-4">
-                <div className="bg-white p-5 rounded-2xl border border-sapphire-100 mb-6">
+              <div className="animate-fade-in mt-4 pb-4">
+                <div className="bg-white p-5 rounded-2xl border border-sapphire-100 mb-4">
                   <p className="text-xs text-sapphire-700 leading-relaxed font-medium">💡 解析：{currentQ.explanation}</p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* 下一题按钮 - 始终固定在底部 safe 区域之上，不被挤压 */}
-          <div className={`shrink-0 pb-32 transition-all duration-300 ${sel ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
+          {/* Footer Button Container */}
+          <div className={`shrink-0 pb-32 pt-4 transition-all duration-300 ${sel ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 pointer-events-none'}`}>
              <button onClick={nextQuestion} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-bold shadow-xl active:scale-95 transition-transform">
                 下一题
              </button>
